@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ImagePlus, X } from "lucide-react";
 import { unmarriedPeople, useFamily, type PersonDraft } from "@/lib/family";
 import Panel from "./Panel";
+import PhotoCropper from "./PhotoCropper";
 
 interface AddPersonPanelProps {
   open: boolean;
@@ -82,6 +83,7 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [cropSrc, setCropSrc] = useState<string | null>(null); // object URL of the picked file
   // Server-side failures: a duplicate spouse, a rate limit, a lost connection.
   const [formError, setFormError] = useState<string | undefined>(undefined);
   const editing = editPersonId ? peopleById.get(editPersonId) : undefined;
@@ -106,6 +108,7 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
       setSubmitted(false);
       setFormError(undefined);
       setSaving(false);
+      setCropSrc(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only on open/target change
   }, [open, editPersonId]);
@@ -116,6 +119,27 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
 
   const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
   const blur = (f: string) => () => setTouched((t) => ({ ...t, [f]: true }));
+
+  function cancelCrop() {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+  }
+
+  async function uploadCropped(file: File) {
+    cancelCrop();
+    setUploading(true);
+    setFormError(undefined);
+    try {
+      // Local mode returns a data URL; server mode uploads to
+      // Storage and returns the object path to persist.
+      const ref = await uploadPhoto(file);
+      set({ photoUrl: ref.photoUrl, photoKey: ref.photoKey ?? "" });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "That photo could not be uploaded.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -166,7 +190,8 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
   return (
     <Panel
       open={open}
-      onClose={onClose}
+      // Escape while cropping backs out of the crop, not the whole form
+      onClose={cropSrc ? cancelCrop : onClose}
       role="dialog"
       label={editing ? "Edit profile" : "Add family member"}
       returnFocusTo={editing ? `[data-person-id="${editing.id}"]` : "[data-add-button]"}
@@ -185,7 +210,13 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
         </button>
       </div>
 
-      <form onSubmit={onSubmit} noValidate className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 pt-4">
+      {cropSrc && <PhotoCropper src={cropSrc} onCancel={cancelCrop} onCropped={uploadCropped} />}
+
+      <form
+        onSubmit={onSubmit}
+        noValidate
+        className={`min-h-0 flex-1 space-y-4 overflow-y-auto p-5 pt-4 ${cropSrc ? "hidden" : ""}`}
+      >
         <div>
           <span className={labelCls}>Photo</span>
           <div className="flex items-center gap-4">
@@ -211,24 +242,12 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
                   type="file"
                   accept="image/*"
                   className="sr-only"
-                  onChange={async (e) => {
+                  onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    setUploading(true);
                     setFormError(undefined);
-                    try {
-                      // Local mode returns a data URL; server mode uploads to
-                      // Storage and returns the object path to persist.
-                      const ref = await uploadPhoto(file);
-                      set({ photoUrl: ref.photoUrl, photoKey: ref.photoKey ?? "" });
-                    } catch (err) {
-                      setFormError(
-                        err instanceof Error ? err.message : "That photo could not be uploaded.",
-                      );
-                    } finally {
-                      setUploading(false);
-                      e.target.value = ""; // let the same file be re-picked after a failure
-                    }
+                    setCropSrc(URL.createObjectURL(file)); // crop first, upload after
+                    e.target.value = ""; // let the same file be re-picked
                   }}
                 />
               </label>

@@ -173,6 +173,14 @@ export async function updatePersonAction(
     const personId = await personIdBySlug(db, family.id, personSlug);
     if (!personId) throw new ActionError("That person is no longer in this family.");
 
+    // Read the current photo before the write so a replaced/removed photo's
+    // object can be cleaned up afterwards.
+    const { data: before } = await db
+      .from("people")
+      .select("photo_key")
+      .eq("id", personId)
+      .maybeSingle();
+
     const { error } = await db.rpc("app_update_person", {
       p_person_id: personId,
       p_name: patch.name.trim(),
@@ -185,6 +193,17 @@ export async function updatePersonAction(
       p_actor_hash: actorHash,
     });
     if (error) throw error;
+
+    // The photo was replaced or removed: delete the old object so Storage
+    // doesn't accumulate orphans. Best-effort — an orphaned object is not
+    // worth failing a saved edit over. Trade-off: app_revert_edit restores
+    // photo_key from history, so reverting a photo change brings back the
+    // key but not the bytes (the person falls back to initials).
+    const oldKey = before?.photo_key as string | null | undefined;
+    if (oldKey && oldKey !== (patch.photoKey ?? null)) {
+      const { error: rmError } = await db.storage.from(MEDIA_BUCKET).remove([oldKey]);
+      if (rmError) console.error("[family action] could not remove replaced photo:", rmError);
+    }
 
     const data = await loadFamilyData(db, family.id);
     revalidatePath(`/f/${slug}`);
@@ -201,12 +220,26 @@ export async function deletePersonAction(slug: string, personSlug: string): Prom
     const personId = await personIdBySlug(db, family.id, personSlug);
     if (!personId) throw new ActionError("That person is no longer in this family.");
 
+    // Same hygiene as updatePersonAction: a deleted person's photo object
+    // would otherwise be orphaned forever.
+    const { data: before } = await db
+      .from("people")
+      .select("photo_key")
+      .eq("id", personId)
+      .maybeSingle();
+
     const { error } = await db.rpc("app_delete_person", {
       p_person_id: personId,
       p_actor_id: actorId,
       p_actor_hash: actorHash,
     });
     if (error) throw error;
+
+    const oldKey = before?.photo_key as string | null | undefined;
+    if (oldKey) {
+      const { error: rmError } = await db.storage.from(MEDIA_BUCKET).remove([oldKey]);
+      if (rmError) console.error("[family action] could not remove deleted person's photo:", rmError);
+    }
 
     const data = await loadFamilyData(db, family.id);
     revalidatePath(`/f/${slug}`);
