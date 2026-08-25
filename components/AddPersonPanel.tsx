@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ImagePlus, X } from "lucide-react";
 import { unmarriedPeople, useFamily, type PersonDraft } from "@/lib/family";
 import Panel from "./Panel";
+import PhotoCropper from "./PhotoCropper";
 
 interface AddPersonPanelProps {
   open: boolean;
@@ -17,7 +18,8 @@ interface FormState {
   birthYear: string;
   deathYear: string;
   bio: string;
-  photoUrl: string; // data URL from the file picker; "" = none
+  photoUrl: string; // display only: data URL, blob URL, or signed URL. "" = none
+  photoKey: string; // what persists in server mode: a Storage path. "" = none
   gender: "" | "male" | "female"; // "" = not specified
   relKind: "child" | "spouse";
   relTarget: string;
@@ -29,6 +31,7 @@ const EMPTY: FormState = {
   deathYear: "",
   bio: "",
   photoUrl: "",
+  photoKey: "",
   gender: "",
   relKind: "child",
   relTarget: "",
@@ -74,10 +77,15 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 }
 
 export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }: AddPersonPanelProps) {
-  const { people, unions, peopleById, addPerson, updatePerson } = useFamily();
+  const { people, unions, peopleById, addPerson, updatePerson, uploadPhoto } = useFamily();
   const [form, setForm] = useState<FormState>(EMPTY);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [cropSrc, setCropSrc] = useState<string | null>(null); // object URL of the picked file
+  // Server-side failures: a duplicate spouse, a rate limit, a lost connection.
+  const [formError, setFormError] = useState<string | undefined>(undefined);
   const editing = editPersonId ? peopleById.get(editPersonId) : undefined;
 
   useEffect(() => {
@@ -91,12 +99,16 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
               deathYear: editing.deathYear ? String(editing.deathYear) : "",
               bio: editing.bio ?? "",
               photoUrl: editing.photoUrl ?? "",
+              photoKey: editing.photoKey ?? "",
               gender: editing.gender ?? "",
             }
           : EMPTY,
       );
       setTouched({});
       setSubmitted(false);
+      setFormError(undefined);
+      setSaving(false);
+      setCropSrc(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only on open/target change
   }, [open, editPersonId]);
@@ -108,9 +120,31 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
   const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
   const blur = (f: string) => () => setTouched((t) => ({ ...t, [f]: true }));
 
-  function onSubmit(e: React.FormEvent) {
+  function cancelCrop() {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+  }
+
+  async function uploadCropped(file: File) {
+    cancelCrop();
+    setUploading(true);
+    setFormError(undefined);
+    try {
+      // Local mode returns a data URL; server mode uploads to
+      // Storage and returns the object path to persist.
+      const ref = await uploadPhoto(file);
+      set({ photoUrl: ref.photoUrl, photoKey: ref.photoKey ?? "" });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "That photo could not be uploaded.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
+    setFormError(undefined);
     const firstInvalid = ["name", "birthYear", "deathYear", "gender", "relTarget"].find(
       (f) => errors[f],
     );
@@ -124,27 +158,40 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
       deathYear: form.deathYear.trim() ? Number(form.deathYear) : undefined,
       bio: form.bio,
       photoUrl: form.photoUrl || undefined,
+      photoKey: form.photoKey || undefined,
       gender: form.gender || undefined,
     };
-    if (editing) {
-      updatePerson(editing.id, base);
-      onSaved(editing.id);
-      return;
+
+    // Saving is a round trip on /f/[slug]. Nothing stopped a double submit
+    // before this, and a doubled submit means a duplicate person.
+    setSaving(true);
+    try {
+      if (editing) {
+        await updatePerson(editing.id, base);
+        onSaved(editing.id);
+        return;
+      }
+      const draft: PersonDraft = {
+        ...base,
+        relation:
+          form.relKind === "child"
+            ? { kind: "child", unionId: form.relTarget }
+            : { kind: "spouse", personId: form.relTarget },
+      };
+      const person = await addPerson(draft);
+      onSaved(person.id);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "That change could not be saved.");
+    } finally {
+      setSaving(false);
     }
-    const draft: PersonDraft = {
-      ...base,
-      relation:
-        form.relKind === "child"
-          ? { kind: "child", unionId: form.relTarget }
-          : { kind: "spouse", personId: form.relTarget },
-    };
-    onSaved(addPerson(draft).id);
   }
 
   return (
     <Panel
       open={open}
-      onClose={onClose}
+      // Escape while cropping backs out of the crop, not the whole form
+      onClose={cropSrc ? cancelCrop : onClose}
       role="dialog"
       label={editing ? "Edit profile" : "Add family member"}
       returnFocusTo={editing ? `[data-person-id="${editing.id}"]` : "[data-add-button]"}
@@ -163,7 +210,13 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
         </button>
       </div>
 
-      <form onSubmit={onSubmit} noValidate className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 pt-4">
+      {cropSrc && <PhotoCropper src={cropSrc} onCancel={cancelCrop} onCropped={uploadCropped} />}
+
+      <form
+        onSubmit={onSubmit}
+        noValidate
+        className={`min-h-0 flex-1 space-y-4 overflow-y-auto p-5 pt-4 ${cropSrc ? "hidden" : ""}`}
+      >
         <div>
           <span className={labelCls}>Photo</span>
           <div className="flex items-center gap-4">
@@ -183,7 +236,7 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
             )}
             <div className="space-y-1.5">
               <label className="flex h-11 w-fit cursor-pointer items-center rounded-xl border border-border px-4 text-sm font-medium transition-colors duration-150 hover:bg-primary/5">
-                {form.photoUrl ? "Change photo" : "Upload photo"}
+                {uploading ? "Uploading…" : form.photoUrl ? "Change photo" : "Upload photo"}
                 <input
                   id="add-photo"
                   type="file"
@@ -192,9 +245,9 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = () => set({ photoUrl: reader.result as string });
-                    reader.readAsDataURL(file);
+                    setFormError(undefined);
+                    setCropSrc(URL.createObjectURL(file)); // crop first, upload after
+                    e.target.value = ""; // let the same file be re-picked
                   }}
                 />
               </label>
@@ -202,7 +255,7 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
                 <button
                   type="button"
                   className="block text-sm text-muted-foreground hover:text-foreground"
-                  onClick={() => set({ photoUrl: "" })}
+                  onClick={() => set({ photoUrl: "", photoKey: "" })}
                 >
                   Remove photo
                 </button>
@@ -388,10 +441,17 @@ export default function AddPersonPanel({ open, editPersonId, onClose, onSaved }:
 
         <button
           type="submit"
-          className="flex h-11 w-full items-center justify-center rounded-xl bg-primary text-sm font-semibold text-on-primary transition-opacity duration-200 hover:opacity-90"
+          disabled={saving || uploading}
+          aria-busy={saving}
+          className="flex h-11 w-full items-center justify-center rounded-xl bg-primary text-sm font-semibold text-on-primary transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {editing ? "Save changes" : "Add to family tree"}
+          {saving ? "Saving…" : editing ? "Save changes" : "Add to family tree"}
         </button>
+        {formError && (
+          <p role="alert" className="mt-1.5 text-sm text-accent">
+            {formError}
+          </p>
+        )}
       </form>
     </Panel>
   );

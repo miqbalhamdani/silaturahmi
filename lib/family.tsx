@@ -1,38 +1,19 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Person, Union } from "./types";
+import type {
+  FamilyData,
+  Person,
+  PersonDraft,
+  PersonPatch,
+  PhotoRef,
+  Union,
+} from "./types";
+import { uniqueId } from "./slug";
 
-export interface FamilyData {
-  people: Person[];
-  unions: Union[];
-}
-
-export type Relation =
-  | { kind: "child"; unionId: string }
-  | { kind: "spouse"; personId: string };
-
-export interface PersonDraft {
-  name: string;
-  birthYear: number;
-  deathYear?: number;
-  bio?: string;
-  photoUrl?: string;
-  gender?: "male" | "female";
-  relation: Relation;
-}
-
-function uniqueId(base: string, taken: Set<string>): string {
-  const slug =
-    base
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "person";
-  if (!taken.has(slug)) return slug;
-  let n = 2;
-  while (taken.has(`${slug}-${n}`)) n++;
-  return `${slug}-${n}`;
-}
+// These moved to ./types so server code can import them — this module is
+// "use client", and a Server Action cannot pull from it at runtime.
+export type { FamilyData, PersonDraft, PersonPatch, PhotoRef, Relation } from "./types";
 
 // The single mutation seam — swap this for a DB call later.
 export function applyAddPerson(
@@ -47,6 +28,7 @@ export function applyAddPerson(
     deathYear: draft.deathYear,
     bio: draft.bio?.trim() || undefined,
     photoUrl: draft.photoUrl || undefined,
+    photoKey: draft.photoKey || undefined,
     gender: draft.gender,
   };
 
@@ -75,8 +57,6 @@ export function applyAddPerson(
   };
 }
 
-export type PersonPatch = Omit<PersonDraft, "relation">;
-
 // The update seam — swap this for a DB call later.
 export function applyUpdatePerson(data: FamilyData, personId: string, patch: PersonPatch): FamilyData {
   return {
@@ -90,6 +70,7 @@ export function applyUpdatePerson(data: FamilyData, personId: string, patch: Per
             deathYear: patch.deathYear,
             bio: patch.bio?.trim() || undefined,
             photoUrl: patch.photoUrl || undefined,
+            photoKey: patch.photoKey || undefined,
             gender: patch.gender,
           }
         : p,
@@ -101,13 +82,19 @@ export function unmarriedPeople(data: FamilyData): Person[] {
   return data.people.filter((p) => !data.unions.some((u) => u.partners.includes(p.id)));
 }
 
-export const FamilyContext = createContext<{
+// Async because /f/[slug] routes these through Server Actions. The local-only
+// canvas on / wraps the pure reducers above to satisfy the same shape.
+export interface FamilyContextValue {
   people: Person[];
   unions: Union[];
   peopleById: Map<string, Person>;
-  addPerson: (draft: PersonDraft) => Person;
-  updatePerson: (personId: string, patch: PersonPatch) => void;
-} | null>(null);
+  addPerson: (draft: PersonDraft) => Promise<Person>;
+  updatePerson: (personId: string, patch: PersonPatch) => Promise<void>;
+  /** Local mode returns a data: URL; server mode uploads and returns a path. */
+  uploadPhoto: (file: File) => Promise<PhotoRef>;
+}
+
+export const FamilyContext = createContext<FamilyContextValue | null>(null);
 
 export function useFamily() {
   const ctx = useContext(FamilyContext);
