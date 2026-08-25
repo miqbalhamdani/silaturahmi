@@ -1,26 +1,84 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #faf7f2;
+  --surface: #fffdf9;
+  --foreground: #2c2418;
+  --muted-foreground: #6b5f4e;
+  --primary: #3d5a3c;
+  --on-primary: #fffdf9;
+  --accent: #c1694f;
+  --border: #e7dfd2;
+  --connector: #b9ae9c;
+  --ring: #3d5a3c;
+  --shadow-card:
+    0 1px 2px rgb(44 36 24 / 0.06),
+    0 8px 24px rgb(44 36 24 / 0.08);
+  --shadow-card-raised:
+    0 2px 4px rgb(44 36 24 / 0.08),
+    0 16px 40px rgb(44 36 24 / 0.14);
+}
+
+.dark {
+  --background: #1c1915;
+  --surface: #26221c;
+  --foreground: #ede6da;
+  --muted-foreground: #a99e8c;
+  --primary: #8fae8d;
+  --on-primary: #1c1915;
+  --accent: #d98b72;
+  --border: #3a342b;
+  --connector: #57503f;
+  --ring: #8fae8d;
+  --shadow-card:
+    0 1px 2px rgb(0 0 0 / 0.3),
+    0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-card-raised:
+    0 2px 4px rgb(0 0 0 / 0.35),
+    0 16px 40px rgb(0 0 0 / 0.5);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-connector: var(--connector);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-nunito-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
+  --shadow-card: var(--shadow-card);
+  --shadow-card-raised: var(--shadow-card-raised);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-nunito-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
