@@ -12,7 +12,7 @@ interface PanelProps {
   children: ReactNode;
 }
 
-/** Responsive surface: floating right card on ≥lg, bottom sheet below. */
+/** Responsive surface: full-screen modal on phones (<sm), floating right card ≥sm. */
 export default function Panel({ open, onClose, role, label, returnFocusTo, children }: PanelProps) {
   useEffect(() => {
     if (!open) return;
@@ -32,8 +32,10 @@ export default function Panel({ open, onClose, role, label, returnFocusTo, child
       role={role}
       aria-label={label}
       aria-hidden={!open}
-      className={`absolute inset-x-3 top-21 bottom-3 z-30 flex flex-col rounded-2xl border border-border bg-surface shadow-card-raised transition-transform duration-300 ease-out sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-88 ${
-        open ? "translate-x-0" : "translate-x-[calc(100%+1.5rem)]"
+      className={`absolute inset-0 z-30 flex flex-col bg-surface pb-[env(safe-area-inset-bottom)] shadow-card-raised transition-transform duration-300 ease-out sm:inset-auto sm:top-4 sm:right-4 sm:bottom-4 sm:w-88 sm:rounded-2xl sm:border sm:border-border sm:pb-0 ${
+        open
+          ? "translate-y-0 sm:translate-x-0"
+          : "translate-y-full sm:translate-x-[calc(100%+1.5rem)] sm:translate-y-0"
       }`}
     >
       {open && children}

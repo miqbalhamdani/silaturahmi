@@ -20,6 +20,7 @@ import { browserClient } from "@/lib/supabase/client";
 import AddPersonPanel from "./AddPersonPanel";
 import Canvas, { applyZoom, fitView, type View } from "./Canvas";
 import DetailPanel from "./DetailPanel";
+import MobileBar from "./MobileBar";
 import Toolbar, { type FamilyStats } from "./Toolbar";
 
 const PANEL_W = 352; // matches Panel sm:w-88
@@ -163,7 +164,9 @@ export default function FamilyTreeApp({
       setAddOpen(false);
       setEditId(null);
       setSelectedId(personId);
-      // detail panel covers the right edge on ≥sm screens — center in the space left of it
+      // ≥sm the detail panel covers the right edge — center in the space left
+      // of it. On phones the modal is full-screen, so center in the whole
+      // viewport for when it closes.
       const panelW = window.innerWidth >= 640 ? PANEL_W : 0;
       animateTo((v) => {
         const scale = Math.max(v.scale, 0.8);
@@ -254,6 +257,15 @@ export default function FamilyTreeApp({
           isOwner={isOwner}
           stats={stats}
           scale={view.scale}
+          dark={dark}
+          onToggleDark={toggleDark}
+          onZoom={onZoom}
+          onFit={onFit}
+          onJumpTo={jumpTo}
+          onAdd={openAdd}
+        />
+        <MobileBar
+          familyName={familyName}
           dark={dark}
           onToggleDark={toggleDark}
           onZoom={onZoom}

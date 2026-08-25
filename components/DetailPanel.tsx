@@ -64,7 +64,7 @@ export default function DetailPanel({ personId, onClose, onJumpTo, onEdit }: Det
     >
       {person && (
         <>
-          <div className="relative shrink-0 overflow-hidden rounded-t-2xl">
+          <div className="relative shrink-0 overflow-hidden sm:rounded-t-2xl">
             {photo ? (
               <img
                 src={photo}

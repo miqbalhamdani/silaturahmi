@@ -2,17 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Check,
   ChevronDown,
   Maximize,
   Minus,
   Moon,
   Plus,
-  Share2,
   Sun,
   TreeDeciduous,
   UserPlus,
 } from "lucide-react";
+import ShareButton from "./ShareButton";
 import Link from "next/link";
 import { Settings, LogIn } from "lucide-react";
 import SearchBox from "./SearchBox";
@@ -44,29 +43,7 @@ const iconBtn =
 
 export default function Toolbar({ familyName, familySlug, isOwner = false, stats, scale, dark, onToggleDark, onZoom, onFit, onJumpTo, onAdd }: ToolbarProps) {
   const [overviewOpen, setOverviewOpen] = useState(false);
-  const [shared, setShared] = useState(false);
   const overviewRef = useRef<HTMLDivElement>(null);
-
-  async function shareFamily() {
-    const payload = {
-      title: "Silaturahmi",
-      // The slug grants view AND edit. This is the one moment a person decides
-      // who can change their family, so the copy has to say so.
-      text: `Anyone with this link can view and edit the ${familyName} family tree.`,
-      url: window.location.origin + window.location.pathname,
-    };
-    if (navigator.share) {
-      await navigator.share(payload).catch(() => {}); // user cancelling is fine
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(payload.url);
-      setShared(true);
-      setTimeout(() => setShared(false), 2000);
-    } catch {
-      /* clipboard unavailable — nothing sane to do without a toast system */
-    }
-  }
 
   useEffect(() => {
     if (!overviewOpen) return;
@@ -148,11 +125,12 @@ export default function Toolbar({ familyName, familySlug, isOwner = false, stats
         )}
       </div>
 
-      <div className="pointer-events-auto min-w-44 flex-1 sm:max-w-72">
+      {/* 1e — phones get the bottom MobileBar instead of these */}
+      <div className="pointer-events-auto hidden min-w-44 flex-1 sm:block sm:max-w-72">
         <SearchBox id="person-search" onJumpTo={onJumpTo} />
       </div>
 
-      <div className="pointer-events-auto ml-auto flex items-center gap-1 rounded-xl border border-border bg-surface/90 p-1 shadow-card backdrop-blur">
+      <div className="pointer-events-auto ml-auto hidden items-center gap-1 rounded-xl border border-border bg-surface/90 p-1 shadow-card backdrop-blur sm:flex">
         <button type="button" aria-label="Zoom out" className={iconBtn} onClick={() => onZoom(1 / 1.25)}>
           <Minus className="size-4" />
         </button>
@@ -166,17 +144,7 @@ export default function Toolbar({ familyName, familySlug, isOwner = false, stats
           <Maximize className="size-4" />
         </button>
         <span aria-hidden className="mx-1 h-5 w-px bg-border" />
-        <button
-          type="button"
-          aria-label="Share family tree"
-          className={iconBtn}
-          onClick={shareFamily}
-        >
-          {shared ? <Check className="size-4 text-primary" /> : <Share2 className="size-4" />}
-        </button>
-        <span aria-live="polite" className="sr-only">
-          {shared ? "Link copied to clipboard" : ""}
-        </span>
+        <ShareButton familyName={familyName} className={iconBtn} />
         <button
           type="button"
           aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
