@@ -20,10 +20,9 @@ functions in `lib/family.tsx` already carry the comments *"The single mutation
 seam — swap this for a DB call later"* and *"The update seam"*. This spec fills
 those seams.
 
-**Login and register pages exist but are markup only.** `app/(auth)/login/` and
-`app/(auth)/register/` render finished forms whose inputs are uncontrolled, carry
-no `name` attributes, and submit through `onSubmit={(e) => e.preventDefault()}`.
-Phase 1 is *wiring*, not building — see §4.
+**Status: all six phases in §9 are implemented.** What follows is the design and
+its reasoning; where the build diverged from an earlier draft of this document,
+the divergence is called out inline rather than quietly edited away.
 
 Three features named in the brief turned out smaller than their names suggest,
 and §5.1 maps each to what it actually needs from the database:
@@ -61,9 +60,10 @@ Read these before changing the schema — every one of them is load-bearing.
 - `layoutTree()` in `lib/layout.ts` **throws `"no root union found"`** unless
   exactly one root union exists, and assumes each person is a partner in at most
   one union. The schema does not enforce this; the write paths do (§6).
-- Person ids are name-derived slugs (`ahmad`, `budi`) used by the
-  `?person=<id>` share link in `DetailPanel.tsx` and by `data-person-id` focus-
-  return selectors. They must survive the move to UUID primary keys.
+- Person ids are name-derived slugs (`ahmad`, `budi`), used by the
+  `data-person-id` focus-return selectors. They must survive the move to UUID
+  primary keys, which is why `lib/mappers.ts` maps `Person.id` to `people.slug`
+  rather than to the uuid.
 - Years are integers, not dates. `birthYear` required, `deathYear` optional
   (`undefined` = living). `gender?: "male" | "female"` was added to `Person`
   since the first draft of this spec — `AddPersonPanel` captures it and the
@@ -354,29 +354,26 @@ one accidental public link puts the family in a search index.
 
 Supabase Auth via `@supabase/ssr`. Four entry paths, all landing on one callback.
 
-### What is already built, and what is missing
+### How the forms are wired
 
-`app/(auth)/` ships a route-group layout plus `login/` and `register/`, sharing
-`auth-ui.tsx` (`GoogleButton`, `Divider`). The visual work is done. None of it is
-connected:
+`app/(auth)/` was finished markup with no `name` attributes and
+`onSubmit={(e) => e.preventDefault()}` stubs. All of it is connected now:
 
-- Inputs are **uncontrolled with no `name` attributes**, so a Server Action
-  receiving `FormData` would read nothing. Add `name` to every field, or lift to
-  controlled state — either works, but `name` + `FormData` is less code.
-- Both `onSubmit` handlers are `(e) => e.preventDefault()` stubs.
-- `GoogleButton` is `type="button"` with no handler.
-- **The login form has no magic-link UI**, though the requirement calls for it.
-  Keep `signInWithOtp` below and add the entry point — an "Email me a link"
-  button beside the password submit is enough.
-- "Reset password" links to `href="#"`. It needs `resetPasswordForEmail`, or it
-  should be removed until it does — a dead link on a login page reads as broken
-  auth.
-- "Keep me signed in" has no wiring. Supabase persists sessions by default, so
-  either bind it to `signOut` scope on the client or drop the checkbox.
-
-Register captures exactly `name`, `email`, `password` with no confirm-password
-field, which matches this spec. There is no email-verification screen yet;
-`/auth/confirm` is still to build.
+- Every field carries a `name`, and both forms use `action={formAction}` with
+  `useActionState`. This is the failure mode worth remembering: an input with no
+  `name` yields an empty `FormData`, and Supabase answers "invalid credentials",
+  which reads as a wrong password rather than a wiring bug. `signInWithPassword`
+  checks for empty values first and says so.
+- The login form has **three submit buttons** — sign in, magic link, reset — each
+  carrying a different `intent`. One `loginAction` dispatches on it, so a single
+  `useActionState` drives one message area instead of three competing states.
+- `GoogleButton` is a real submit inside its own `<form action={signInWithGoogle}>`.
+- Pending state comes from `useFormStatus` in child components, which is the only
+  place it can be read. `primaryButtonClass` gained a `disabled:` variant, and
+  errors render in `#c1694f` — the palette's terracotta, matching
+  `AddPersonPanel`'s `text-accent`. A true red would have been a new colour.
+- "Keep me signed in" is `defaultChecked` and inert: Supabase persists sessions
+  anyway, so the checkbox reflects reality rather than pretending to toggle it.
 
 | Flow | Call |
 |---|---|
@@ -468,32 +465,34 @@ in the Server Actions.
 
 ## 5. Routes
 
-| Route | Built? | Access | Purpose |
-|---|---|---|---|
-| `/` | **yes** | public | Currently renders `FamilyTreeApp` directly; becomes the landing page |
-| `/login` | **markup** | public | `app/(auth)/login/` — password + Google; needs magic link (§4) |
-| `/register` | **markup** | public | `app/(auth)/register/` — name, email, password |
-| `/demo` | no | public | Today's `FamilyTreeApp` seeded from `lib/data.ts`, read-only. Zero DB. |
-| `/auth/callback` | no | public | Route Handler: PKCE code → session |
-| `/auth/confirm` | no | public | Email verification landing |
-| `/app` | no | owner | Empty state → family wizard → link to the family |
-| `/f/[slug]` | no | slug holder | The graph. View, add, edit. |
-| `/f/[slug]/settings` | no | owner | Name, description, cover, rotate slug, edit log, revert |
+| Route | Access | Purpose |
+|---|---|---|
+| `/` | public | The demo tree, seeded from `lib/data.ts`. No slug, so edits live in React state and vanish on reload. |
+| `/login` | public | Password, magic link, reset, and Google |
+| `/register` | public | Name, email, password → confirmation email |
+| `/auth/callback` | public | Route Handler: PKCE code → session |
+| `/auth/confirm` | public | Email confirmation and recovery links (`verifyOtp`) |
+| `/app` | owner | Families list, or the empty state |
+| `/app/new` | owner | The wizard: family settings + first person |
+| `/f/[slug]` | slug holder | The graph. View, add, edit. |
+| `/f/[slug]/settings` | owner | Name, description, share link, rotate slug, edit log, revert |
 
-Note what this table says: **there is no family-scoped route yet.** `/` renders
-the tree straight from `lib/data.ts`, so everything §3 says about the slug is
-still unimplemented. Moving the canvas from `/` to `/f/[slug]` is the pivot of
-phase 3, and `/` becomes a landing page.
-
-`/demo` is the "link to a demo page" in the login flow, and it costs nothing —
-it is the current app, unchanged, with mutations disabled.
+**There is no landing page and no separate `/demo`** — `/` is the demo, which is
+what the "link to a demo page" in the auth flow points at. Because nothing else
+links to sign-in, the family-overview popover carries a "Sign in to build your
+own" link when no slug is present.
 
 `/app`'s empty state is step 3 of the product flow: Family Settings and Add
 First Person, in one wizard. The first person is created with
 `p_rel_kind = 'root'`; the root union appears when their spouse is added.
 
-The `?person=<slug>` share param that `FamilyTreeApp` reads on mount keeps
-working unchanged — it now carries `people.slug`.
+**`?person=<slug>` deep links are new.** An earlier draft of this document said
+`FamilyTreeApp` already read that param on mount. It did not — nothing in the
+app read `searchParams`, and `DetailPanel` had no share button. It is built now:
+`app/f/[slug]/page.tsx` reads `searchParams` (a Promise in Next 16) and passes
+`initialPersonSlug`, which the canvas hands to its existing `jumpTo` once the
+layout contains that person. A `didDeepLink` ref makes it fire once, so a later
+edit does not yank the view back.
 
 ### 5.1 Family overview, share, and edit profile
 
@@ -659,12 +658,28 @@ select * from unions where family_id = $1;
 - `Union.children` = people grouped by `parent_union_id`, ordered by
   `sibling_order`
 
-`FamilyTreeApp` changes in exactly one way: it takes `initialData` and
-`familySlug` as props instead of importing `lib/data`. `applyAddPerson` and
-`applyUpdatePerson` stay exactly as they are, now serving as the optimistic
-local update, with the Server Action reconciling afterwards. `Canvas.tsx`,
-`lib/layout.ts`, `PersonCard.tsx`, `DetailPanel.tsx`, and `Panel.tsx` are
-untouched.
+`FamilyTreeApp` takes `initialData`, `familyName`, and an optional `familySlug`
+as props instead of importing `lib/data`. When `familySlug` is absent it runs
+the local reducers exactly as before — that is what keeps the demo tree on `/`
+alive on one component. `applyAddPerson` and `applyUpdatePerson` keep their
+signatures, so the `npx tsx lib/family.tsx` self-check still passes.
+
+The context turns **async** (`addPerson` returns `Promise<Person>`), because a
+Server Action cannot satisfy the synchronous `onSaved(addPerson(draft).id)` that
+`AddPersonPanel` relied on. Each action returns the family's **whole**
+`FamilyData`, so the canvas swaps one `useState` value with no merge logic and
+no id reconciliation. `AddPersonPanel` gains a pending flag; nothing prevented a
+double submit before, and a doubled submit is a duplicate person.
+
+`Canvas.tsx`, `PersonCard.tsx`, `DetailPanel.tsx`, and `Panel.tsx` are untouched.
+
+**`lib/layout.ts` is not.** An earlier draft claimed it was. `layoutTree` threw
+`"no root union found"` whenever `unions` was empty, and the family wizard
+produces exactly that — one person, no union — so every newly created family
+500'd on its first page load. It now throws only when a non-empty union set has
+no root, places people the root subtree never reached, and returns zeroed
+`bounds` for an empty family instead of `Infinity`. The self-check covers all
+three cases.
 
 ---
 
@@ -750,12 +765,15 @@ contain two UUIDs, so they are unguessable on their own.
 ### Paths
 
 ```
-families/<family_id>/people/<person_id>/<nanoid>.<ext>
+families/<family_id>/photos/<nanoid>.<ext>
 families/<family_id>/cover/<nanoid>.<ext>
 ```
 
-Family-scoped, so purging a family is one prefix delete. Deleting a single object
-is `storage.from('family-media').remove([path])`.
+An earlier draft put `<person_id>` in the photo path. It cannot go there: the
+photo is uploaded from the add form **before** the person row exists, so there
+is no id to name it with. `photo_key` on the row is the only link needed, and
+the family prefix still means purging a family is one prefix delete. Deleting a
+single object is `storage.from('family-media').remove([path])`.
 
 ### `next.config.ts`
 
@@ -831,10 +849,10 @@ perspective, and reverts write new rows rather than editing old ones.
 
 | Phase | Ships |
 |---|---|
-| 0 | `0001_init.sql` — tables, constraints, triggers, RPCs, RLS |
+| 0 | `0001_init.sql` tables/triggers/RPCs/RLS, `0002_storage.sql` bucket, `0003_admin_rpcs.sql` delete + revert |
 | 1 | `@supabase/ssr` clients, `proxy.ts`, **wire the existing** `/login` + `/register` (add `name` attrs, handlers, magic-link entry point), `/auth/callback`, `/auth/confirm` |
 | 2 | `/app` empty state + family wizard, slug generation |
-| 3 | `/f/[slug]` read path: `lib/mappers.ts`, `FamilyTreeApp` takes props, canvas moves off `/`, `/demo` split off, `familyName` + `FamilyStats` fed from the DB |
+| 3 | `/f/[slug]` read path: `lib/mappers.ts`, `FamilyTreeApp` takes props, `?person=` deep links, `familyName` + `FamilyStats` fed from the DB |
 | 4 | Server Actions for add/update, audit wiring, anon rate limit |
 | 5 | `family-media` bucket, signed upload + batched signed reads, `AddPersonPanel` upload rewrite, cover image, `next.config.ts` |
 | 6 | `/f/[slug]/settings`: edit log, revert, rotate slug, share-sheet copy (§5.1) |
@@ -877,7 +895,7 @@ console:
 ### Layout compatibility (phase 3)
 
 Port the 14 seed people and 4 unions from `lib/data.ts` into the database, load
-`/f/<slug>`, and confirm the rendered tree is identical to `/demo`.
+`/f/<slug>`, and confirm the rendered tree is identical to the demo at `/`.
 `lib/layout.ts` already carries an argv-guarded self-check asserting no card
 overlap (`npx tsx lib/layout.ts`) — run it against DB-sourced data too.
 

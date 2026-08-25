@@ -26,15 +26,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${fraunces.variable} ${nunitoSans.variable} h-full antialiased`}
     >
-      <body className="h-full overflow-hidden">
-        <script
-          // set .dark before paint to avoid theme flash
-          dangerouslySetInnerHTML={{
-            __html: `if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.classList.add("dark")`,
-          }}
-        />
-        {children}
-      </body>
+      {/* always starts light; the toolbar toggle opts into dark */}
+      <body className="h-full overflow-hidden">{children}</body>
     </html>
   );
 }

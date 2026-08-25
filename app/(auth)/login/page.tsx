@@ -5,6 +5,13 @@ export const metadata: Metadata = {
   title: "Sign in — Silaturahmi",
 };
 
-export default function LoginPage() {
-  return <LoginForm />;
+// searchParams is a Promise in Next 16. Reading ?error= here rather than with
+// useSearchParams in the client keeps the form out of a Suspense boundary.
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
+  return <LoginForm callbackError={error} />;
 }

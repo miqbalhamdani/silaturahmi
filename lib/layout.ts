@@ -74,22 +74,46 @@ export function layoutTree(people: Person[], unions: Union[]): TreeLayout {
   }
 
   const root = unions.find((u) => u.partners.every((p) => !childToUnion.has(p)));
-  if (!root) throw new Error("no root union found");
-  placeUnion(root, 0, 0);
+  // No unions at all is a legitimate brand-new family — the wizard creates one
+  // person and no union. Only a union set with no root among it is broken.
+  if (!root && unions.length) throw new Error("no root union found");
+  if (root) placeUnion(root, 0, 0);
+
+  // Anyone the root subtree never reached: the wizard's first person before a
+  // union exists, and any stray second root, which should be visible rather
+  // than silently missing from the canvas.
+  const placedRight = () =>
+    positions.size ? Math.max(...[...positions.values()].map((p) => p.x + CARD_W)) : 0;
+  let orphanX = positions.size ? placedRight() + SIBLING_GAP : 0;
+  for (const p of people) {
+    if (positions.has(p.id)) continue;
+    const u = unionByPartner.get(p.id);
+    if (u && !positions.has(u.partners[0]) && !positions.has(u.partners[1])) {
+      placeUnion(u, orphanX, 0);
+    } else if (!u) {
+      positions.set(p.id, { x: orphanX, y: 0, gen: 0 });
+    } else {
+      continue; // partner already placed this union
+    }
+    orphanX = placedRight() + SIBLING_GAP;
+  }
 
   const coupleEdges: string[] = [];
   const childEdges: string[] = [];
   for (const u of unions) {
-    const a = positions.get(u.partners[0])!;
-    const b = positions.get(u.partners[1])!;
+    const a = positions.get(u.partners[0]);
+    const b = positions.get(u.partners[1]);
+    if (!a || !b) continue; // partner missing from this family's people
     const midY = a.y + CARD_H / 2;
     coupleEdges.push(`M ${a.x + CARD_W} ${midY} H ${b.x}`);
     if (u.children.length === 0) continue;
 
     const mx = (a.x + CARD_W + b.x) / 2;
     const busY = a.y + CARD_H + (GEN_GAP - CARD_H) / 2;
-    const centers = u.children.map((c) => positions.get(c)!.x + CARD_W / 2);
-    const childY = positions.get(u.children[0])!.y;
+    const placedChildren = u.children.filter((c) => positions.has(c));
+    if (placedChildren.length === 0) continue;
+    const centers = placedChildren.map((c) => positions.get(c)!.x + CARD_W / 2);
+    const childY = positions.get(placedChildren[0])!.y;
     let d = `M ${mx} ${midY} V ${busY}`;
     d += ` M ${Math.min(...centers, mx)} ${busY} H ${Math.max(...centers, mx)}`;
     for (const cxc of centers) d += ` M ${cxc} ${busY} V ${childY}`;
@@ -97,6 +121,9 @@ export function layoutTree(people: Person[], unions: Union[]): TreeLayout {
   }
 
   const xs = [...positions.values()];
+  // Math.min(...[]) is Infinity, which would poison every fit-to-view sum.
+  if (xs.length === 0)
+    return { positions, coupleEdges, childEdges, bounds: { x: 0, y: 0, w: 0, h: 0 } };
   const minX = Math.min(...xs.map((p) => p.x));
   const maxX = Math.max(...xs.map((p) => p.x + CARD_W));
   const maxY = Math.max(...xs.map((p) => p.y + CARD_H));
@@ -141,6 +168,16 @@ if (typeof process !== "undefined" && process.argv[1]?.endsWith("layout.ts")) {
     );
     console.assert(spouseAdded.coupleEdges.length === coupleEdges.length + 1, "extra couple edge");
     console.assert(spouseAdded.childEdges.length === childEdges.length, "no extra child edge");
+
+    // the family wizard's output: one person, no unions. This threw before.
+    const lone = layoutTree([{ id: "solo", name: "Solo Person", birthYear: 1980 }], []);
+    console.assert(lone.positions.size === 1, "lone person placed");
+    console.assert(lone.bounds.w === CARD_W, `lone bounds width ${lone.bounds.w}`);
+
+    // an empty family must not produce Infinity bounds
+    const none = layoutTree([], []);
+    console.assert(none.bounds.w === 0 && none.bounds.h === 0, "empty bounds are zero");
+
     console.log("layout self-check passed:", entries.length, "people placed");
   });
 }

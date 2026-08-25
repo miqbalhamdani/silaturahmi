@@ -13,7 +13,8 @@ import {
   TreeDeciduous,
   UserPlus,
 } from "lucide-react";
-import { familyName } from "@/lib/data";
+import Link from "next/link";
+import { Settings, LogIn } from "lucide-react";
 import SearchBox from "./SearchBox";
 
 export interface FamilyStats {
@@ -24,6 +25,10 @@ export interface FamilyStats {
 }
 
 interface ToolbarProps {
+  familyName: string;
+  /** Absent on the local demo tree at /. */
+  familySlug?: string;
+  isOwner?: boolean;
   stats: FamilyStats;
   scale: number;
   dark: boolean;
@@ -37,7 +42,7 @@ interface ToolbarProps {
 const iconBtn =
   "flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-primary/10 hover:text-foreground";
 
-export default function Toolbar({ stats, scale, dark, onToggleDark, onZoom, onFit, onJumpTo, onAdd }: ToolbarProps) {
+export default function Toolbar({ familyName, familySlug, isOwner = false, stats, scale, dark, onToggleDark, onZoom, onFit, onJumpTo, onAdd }: ToolbarProps) {
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [shared, setShared] = useState(false);
   const overviewRef = useRef<HTMLDivElement>(null);
@@ -45,7 +50,9 @@ export default function Toolbar({ stats, scale, dark, onToggleDark, onZoom, onFi
   async function shareFamily() {
     const payload = {
       title: "Silaturahmi",
-      text: `${familyName} family tree`,
+      // The slug grants view AND edit. This is the one moment a person decides
+      // who can change their family, so the copy has to say so.
+      text: `Anyone with this link can view and edit the ${familyName} family tree.`,
       url: window.location.origin + window.location.pathname,
     };
     if (navigator.share) {
@@ -115,6 +122,28 @@ export default function Toolbar({ stats, scale, dark, onToggleDark, onZoom, onFi
                 </div>
               ))}
             </dl>
+
+            {isOwner && familySlug && (
+              <Link
+                href={`/f/${familySlug}/settings`}
+                className="mt-4 flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium transition-colors duration-150 hover:bg-primary/5"
+              >
+                <Settings aria-hidden className="size-4" />
+                Family settings
+              </Link>
+            )}
+
+            {/* There is no landing page, so without this /login is only
+                reachable by typing it. */}
+            {!familySlug && (
+              <Link
+                href="/login"
+                className="mt-4 flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium transition-colors duration-150 hover:bg-primary/5"
+              >
+                <LogIn aria-hidden className="size-4" />
+                Sign in to build your own
+              </Link>
+            )}
           </div>
         )}
       </div>

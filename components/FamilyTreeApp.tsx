@@ -1,25 +1,50 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { people as seedPeople, unions as seedUnions } from "@/lib/data";
 import {
   applyAddPerson,
   applyUpdatePerson,
   FamilyContext,
+  type FamilyContextValue,
   type FamilyData,
   type PersonDraft,
   type PersonPatch,
 } from "@/lib/family";
 import { CARD_H, CARD_W, layoutTree } from "@/lib/layout";
+import {
+  addPersonAction,
+  createPhotoUploadUrl,
+  updatePersonAction,
+} from "@/lib/actions/family";
+import { browserClient } from "@/lib/supabase/client";
 import AddPersonPanel from "./AddPersonPanel";
 import Canvas, { applyZoom, fitView, type View } from "./Canvas";
 import DetailPanel from "./DetailPanel";
 import Toolbar, { type FamilyStats } from "./Toolbar";
 
 const PANEL_W = 352; // matches Panel sm:w-88
+const MEDIA_BUCKET = "family-media";
 
-export default function FamilyTreeApp() {
-  const [data, setData] = useState<FamilyData>({ people: seedPeople, unions: seedUnions });
+interface FamilyTreeAppProps {
+  initialData: FamilyData;
+  familyName: string;
+  /**
+   * Present on /f/[slug]: writes go through Server Actions. Absent on /: the
+   * canvas runs on the pure local reducers, exactly as it always has.
+   */
+  familySlug?: string;
+  initialPersonSlug?: string;
+  isOwner?: boolean;
+}
+
+export default function FamilyTreeApp({
+  initialData,
+  familyName,
+  familySlug,
+  initialPersonSlug,
+  isOwner = false,
+}: FamilyTreeAppProps) {
+  const [data, setData] = useState<FamilyData>(initialData);
   const layout = useMemo(() => layoutTree(data.people, data.unions), [data]);
 
   const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 });
@@ -37,27 +62,70 @@ export default function FamilyTreeApp() {
     setDark(document.documentElement.classList.contains("dark"));
   }, []);
 
-  const family = useMemo(
+  const family = useMemo<FamilyContextValue>(
     () => ({
       people: data.people,
       unions: data.unions,
       peopleById: new Map(data.people.map((p) => [p.id, p])),
-      addPerson: (draft: PersonDraft) => {
-        const result = applyAddPerson(data, draft);
-        setData(result.data);
-        return result.person;
+
+      // Server mode replaces the whole graph with what the DB returned rather
+      // than merging: no id reconciliation to get wrong, and concurrent edits
+      // by other people show up on the next write.
+      addPerson: async (draft: PersonDraft) => {
+        if (!familySlug) {
+          const result = applyAddPerson(data, draft);
+          setData(result.data);
+          return result.person;
+        }
+        const { data: fresh, personSlug } = await addPersonAction(familySlug, draft);
+        setData(fresh);
+        const created = fresh.people.find((p) => p.id === personSlug);
+        if (!created) throw new Error("The new person was not returned by the server.");
+        return created;
       },
-      updatePerson: (personId: string, patch: PersonPatch) => {
-        setData(applyUpdatePerson(data, personId, patch));
+
+      updatePerson: async (personId: string, patch: PersonPatch) => {
+        if (!familySlug) {
+          setData(applyUpdatePerson(data, personId, patch));
+          return;
+        }
+        setData(await updatePersonAction(familySlug, personId, patch));
+      },
+
+      uploadPhoto: async (file: File) => {
+        if (!familySlug) {
+          // Local mode has nowhere to put bytes, so the data URL is the value.
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error("Could not read that file."));
+            reader.readAsDataURL(file);
+          });
+          return { photoUrl: dataUrl };
+        }
+
+        const { path, token } = await createPhotoUploadUrl(familySlug, file.type, file.size);
+        const { error } = await browserClient()
+          .storage.from(MEDIA_BUCKET)
+          .uploadToSignedUrl(path, token, file);
+        // The bucket enforces size and MIME itself, so this catches a real
+        // rejection rather than a guess the client made.
+        if (error) throw new Error(error.message);
+
+        // Preview from the local file: instant, and no signed URL to mint.
+        return { photoUrl: URL.createObjectURL(file), photoKey: path };
       },
     }),
-    [data],
+    [data, familySlug],
   );
 
   const stats = useMemo<FamilyStats>(
     () => ({
       members: data.people.length,
-      generations: Math.max(...[...layout.positions.values()].map((p) => p.gen)) + 1,
+      // Math.max(...[]) is -Infinity — a family can legitimately be empty.
+      generations: layout.positions.size
+        ? Math.max(...[...layout.positions.values()].map((p) => p.gen)) + 1
+        : 0,
       male: data.people.filter((p) => p.gender === "male").length,
       female: data.people.filter((p) => p.gender === "female").length,
     }),
@@ -117,6 +185,17 @@ export default function FamilyTreeApp() {
     }
   }, [layout, pendingFocus, jumpTo]);
 
+  // ?person=<slug> deep link. Runs once: didDeepLink stops a later layout
+  // change from yanking the view back to the shared person.
+  const didDeepLink = useRef(false);
+  useEffect(() => {
+    if (didDeepLink.current || !initialPersonSlug) return;
+    if (!layout.positions.has(initialPersonSlug)) return;
+    didDeepLink.current = true;
+    didInitialFit.current = true; // the deep link IS the initial view
+    jumpTo(initialPersonSlug);
+  }, [layout, initialPersonSlug, jumpTo]);
+
   function onFit() {
     const el = viewportRef.current;
     if (el) animateTo(fitView(layout.bounds, el.clientWidth, el.clientHeight));
@@ -170,6 +249,9 @@ export default function FamilyTreeApp() {
           viewportRef={viewportRef}
         />
         <Toolbar
+          familyName={familyName}
+          familySlug={familySlug}
+          isOwner={isOwner}
           stats={stats}
           scale={view.scale}
           dark={dark}

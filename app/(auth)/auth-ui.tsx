@@ -1,13 +1,67 @@
+"use client";
+
 // Shared presentational bits for the auth pages. These pages are always
 // light (white background) regardless of the app's .dark class, so colors
 // are the light-palette values written out explicitly.
+
+import { useFormStatus } from "react-dom";
+import { signInWithGoogle } from "./actions";
+
 export const inputClass =
   "h-13 w-full rounded-full border border-[#e7dfd2] bg-white px-6 text-base text-[#2c2418] placeholder:text-[#a99e8c] focus-visible:outline-[#3d5a3c]";
 
 export const labelClass = "mb-2 block text-sm font-semibold text-[#2c2418]";
 
 export const primaryButtonClass =
-  "h-13 w-full rounded-full bg-[#3d5a3c] text-base font-semibold text-[#fffdf9] transition-colors hover:bg-[#334c32]";
+  "h-13 w-full rounded-full bg-[#3d5a3c] text-base font-semibold text-[#fffdf9] transition-colors hover:bg-[#334c32] disabled:cursor-not-allowed disabled:opacity-60";
+
+// #c1694f is the palette's terracotta accent — the same token AddPersonPanel
+// uses for field errors. A true red would be a new colour in this design.
+export function FormMessage({ error, notice }: { error?: string; notice?: string }) {
+  if (!error && !notice) return null;
+  return (
+    <p
+      role={error ? "alert" : "status"}
+      className={`text-sm ${error ? "text-[#c1694f]" : "text-[#3d5a3c]"}`}
+    >
+      {error ?? notice}
+    </p>
+  );
+}
+
+/**
+ * Reads pending from the enclosing form, so it must live INSIDE the <form>.
+ * Nothing stopped a double submit before this.
+ */
+export function SubmitButton({ children, pendingLabel }: { children: string; pendingLabel: string }) {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending} aria-busy={pending} className={primaryButtonClass}>
+      {pending ? pendingLabel : children}
+    </button>
+  );
+}
+
+/** A secondary submit that posts the same form to a different action. */
+export function SecondarySubmit({
+  children,
+  formAction,
+}: {
+  children: string;
+  formAction: (formData: FormData) => void;
+}) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      formAction={formAction}
+      disabled={pending}
+      className="h-13 w-full rounded-full border border-[#e7dfd2] bg-white text-base font-semibold text-[#2c2418] transition-colors hover:bg-[#faf7f2] disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {children}
+    </button>
+  );
+}
 
 export function Divider() {
   return (
@@ -21,8 +75,9 @@ export function Divider() {
 
 export function GoogleButton() {
   return (
+    <form action={signInWithGoogle}>
     <button
-      type="button"
+      type="submit"
       className="flex h-13 w-full items-center justify-center gap-3 rounded-full border border-[#e7dfd2] bg-white text-base font-semibold text-[#2c2418] transition-colors hover:bg-[#faf7f2]"
     >
       <svg className="size-5" viewBox="0 0 24 24" aria-hidden="true">
@@ -45,5 +100,6 @@ export function GoogleButton() {
       </svg>
       Continue with Google
     </button>
+    </form>
   );
 }
