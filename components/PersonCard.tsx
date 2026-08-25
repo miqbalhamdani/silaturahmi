@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { initials } from "@/lib/data";
 import { useFamily } from "@/lib/family";
 import type { NodePos } from "@/lib/layout";
@@ -15,6 +16,9 @@ interface PersonCardProps {
 
 export default function PersonCard({ personId, pos, width, height, selected, onSelect }: PersonCardProps) {
   const person = useFamily().peopleById.get(personId)!;
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => setImgFailed(false), [person.photoUrl]);
+  const photo = !imgFailed ? person.photoUrl : undefined;
   const years = person.deathYear
     ? `${person.birthYear} – ${person.deathYear}`
     : `b. ${person.birthYear}`;
@@ -33,16 +37,26 @@ export default function PersonCard({ personId, pos, width, height, selected, onS
       }`}
       style={{ left: pos.x, top: pos.y, width, height }}
     >
-      <span
-        aria-hidden
-        className={`flex size-11 shrink-0 items-center justify-center rounded-full font-display text-sm font-semibold ${
-          person.deathYear
-            ? "bg-connector/25 text-muted-foreground"
-            : "bg-primary/15 text-primary"
-        }`}
-      >
-        {initials(person.name)}
-      </span>
+      {photo ? (
+        <img
+          src={photo}
+          alt="" // decorative: the name sits right beside it
+          loading="lazy"
+          className="size-11 shrink-0 rounded-full border border-border object-cover"
+          onError={() => setImgFailed(true)}
+        />
+      ) : (
+        <span
+          aria-hidden
+          className={`flex size-11 shrink-0 items-center justify-center rounded-full font-display text-sm font-semibold ${
+            person.deathYear
+              ? "bg-connector/25 text-muted-foreground"
+              : "bg-primary/15 text-primary"
+          }`}
+        >
+          {initials(person.name)}
+        </span>
+      )}
       <span className="min-w-0">
         <span className="block truncate font-display text-[15px] font-semibold leading-tight">
           {person.name}
