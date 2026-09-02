@@ -8,10 +8,10 @@ import {
   Moon,
   Plus,
   Sun,
-  TreeDeciduous,
   UserPlus,
 } from "lucide-react";
 import ShareButton from "./ShareButton";
+import { LogoMark } from "./Logo";
 import Link from "next/link";
 import { Settings, LogIn } from "lucide-react";
 import SearchBox from "./SearchBox";
@@ -78,7 +78,7 @@ export default function Toolbar({ familyName, familySlug, isOwner = false, stats
           onClick={() => setOverviewOpen((o) => !o)}
           className="flex items-center gap-2.5 rounded-xl border border-border bg-surface/90 py-2 pr-3 pl-3 text-left shadow-card backdrop-blur transition-colors duration-150 hover:bg-surface"
         >
-          <TreeDeciduous aria-hidden className="size-6 text-primary" />
+          <LogoMark className="size-7 shrink-0 text-primary" />
           <div>
             <h1 className="font-display text-lg leading-none font-semibold">Silaturahmi</h1>
             <p className="text-[11px] text-muted-foreground">{familyName} family tree</p>

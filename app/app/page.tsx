@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Plus, Users } from "lucide-react";
+import Logo from "@/components/Logo";
 import { currentUser } from "@/lib/supabase/server";
 import { serviceClient } from "@/lib/supabase/service";
 import { signOut } from "../(auth)/actions";
@@ -34,7 +35,8 @@ export default async function AppPage() {
   return (
     <main className="h-full overflow-y-auto px-6 py-12">
       <div className="mx-auto w-full max-w-3xl">
-      <header className="flex items-baseline justify-between gap-4">
+      <Logo />
+      <header className="mt-8 flex items-baseline justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl">Your families</h1>
           <p className="mt-1 text-sm text-muted-foreground">Signed in as {displayName}</p>
