@@ -13,6 +13,7 @@ import {
   MAX_IMAGE_BYTES,
   extForMime,
   familySlugFor,
+  isMediaKey,
   photoPath,
   slugify,
 } from "../slug";
@@ -85,6 +86,17 @@ function toUserMessage(error: { message?: string; code?: string }): string {
   return msg ? `That change could not be saved: ${msg}` : "That change could not be saved.";
 }
 
+/**
+ * A client-supplied Storage key, or null for none. A key outside this family's
+ * own folder is refused: stored, it would be signed for anyone holding this
+ * slug and later deleted with the service-role key.
+ */
+function checkedKey(familyId: string, folder: "photos" | "cover", key: unknown): string | null {
+  if (key === undefined || key === null || key === "") return null;
+  if (!isMediaKey(key, familyId, folder)) throw new ValidationError("That image is not part of this family.");
+  return key;
+}
+
 function rethrow(e: unknown): never {
   if (e instanceof ActionError || e instanceof ValidationError || e instanceof RateLimitError)
     throw new ActionError(e.message);
@@ -145,7 +157,7 @@ export async function addPersonAction(
       p_death_year: draft.deathYear ?? null,
       p_bio: draft.bio ?? null,
       p_gender: draft.gender ?? null,
-      p_photo_key: draft.photoKey ?? null,
+      p_photo_key: checkedKey(family.id, "photos", draft.photoKey),
       p_rel_kind: draft.relation.kind,
       p_rel_target: relTarget,
       p_actor_id: actorId,
@@ -173,14 +185,6 @@ export async function updatePersonAction(
     const personId = await personIdBySlug(db, family.id, personSlug);
     if (!personId) throw new ActionError("That person is no longer in this family.");
 
-    // Read the current photo before the write so a replaced/removed photo's
-    // object can be cleaned up afterwards.
-    const { data: before } = await db
-      .from("people")
-      .select("photo_key")
-      .eq("id", personId)
-      .maybeSingle();
-
     const { error } = await db.rpc("app_update_person", {
       p_person_id: personId,
       p_name: patch.name.trim(),
@@ -188,22 +192,17 @@ export async function updatePersonAction(
       p_death_year: patch.deathYear ?? null,
       p_bio: patch.bio ?? null,
       p_gender: patch.gender ?? null,
-      p_photo_key: patch.photoKey ?? null,
+      p_photo_key: checkedKey(family.id, "photos", patch.photoKey),
       p_actor_id: actorId,
       p_actor_hash: actorHash,
     });
     if (error) throw error;
 
-    // The photo was replaced or removed: delete the old object so Storage
-    // doesn't accumulate orphans. Best-effort — an orphaned object is not
-    // worth failing a saved edit over. Trade-off: app_revert_edit restores
-    // photo_key from history, so reverting a photo change brings back the
-    // key but not the bytes (the person falls back to initials).
-    const oldKey = before?.photo_key as string | null | undefined;
-    if (oldKey && oldKey !== (patch.photoKey ?? null)) {
-      const { error: rmError } = await db.storage.from(MEDIA_BUCKET).remove([oldKey]);
-      if (rmError) console.error("[family action] could not remove replaced photo:", rmError);
-    }
+    // A replaced or removed photo's object is deliberately kept:
+    // app_revert_edit restores photo_key from history, and the revert is only
+    // worth anything if the bytes are still there.
+    // TODO: sweep orphans later — objects under families/<id>/photos/ that no
+    // people row and no person_edits before/after references.
 
     const data = await loadFamilyData(db, family.id);
     revalidatePath(`/f/${slug}`);
@@ -220,8 +219,8 @@ export async function deletePersonAction(slug: string, personSlug: string): Prom
     const personId = await personIdBySlug(db, family.id, personSlug);
     if (!personId) throw new ActionError("That person is no longer in this family.");
 
-    // Same hygiene as updatePersonAction: a deleted person's photo object
-    // would otherwise be orphaned forever.
+    // A deleted person's photo object would otherwise be orphaned forever.
+    // Only ever this family's own objects: the service-role key deletes it.
     const { data: before } = await db
       .from("people")
       .select("photo_key")
@@ -236,7 +235,7 @@ export async function deletePersonAction(slug: string, personSlug: string): Prom
     if (error) throw error;
 
     const oldKey = before?.photo_key as string | null | undefined;
-    if (oldKey) {
+    if (isMediaKey(oldKey, family.id, "photos")) {
       const { error: rmError } = await db.storage.from(MEDIA_BUCKET).remove([oldKey]);
       if (rmError) console.error("[family action] could not remove deleted person's photo:", rmError);
     }
@@ -263,7 +262,8 @@ export async function updateFamilyAction(
       description: settings.description.trim() || null,
     };
     // undefined means "not touched"; null means "cleared".
-    if (settings.coverKey !== undefined) patch.cover_key = settings.coverKey;
+    if (settings.coverKey !== undefined)
+      patch.cover_key = checkedKey(family.id, "cover", settings.coverKey);
 
     const { error } = await db.from("families").update(patch).eq("id", family.id);
     if (error) throw error;

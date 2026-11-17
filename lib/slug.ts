@@ -53,6 +53,21 @@ export function coverPath(familyId: string, ext: string): string {
   return `families/${familyId}/cover/${randomSuffix(16)}.${ext}`;
 }
 
+/**
+ * True only for an object directly in this family's own folder. Keys arrive
+ * from the client and are signed and deleted with the service-role key, so
+ * anything else — another family's path, `..` — must never be trusted.
+ */
+export function isMediaKey(key: unknown, familyId: string, folder: "photos" | "cover"): key is string {
+  const prefix = `families/${familyId}/${folder}/`;
+  return (
+    typeof key === "string" &&
+    key.startsWith(prefix) &&
+    /^[A-Za-z0-9._-]+$/.test(key.slice(prefix.length)) &&
+    !key.includes("..")
+  );
+}
+
 const EXT_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",

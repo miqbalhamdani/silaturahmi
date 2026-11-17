@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FamilyData, Person, Union } from "./types";
 import { MEDIA_BUCKET } from "./supabase/service";
+import { isMediaKey } from "./slug";
 
 /** Signed read URLs last an hour — long enough that a session rarely outlives one. */
 const SIGNED_URL_TTL = 3600;
@@ -85,9 +86,14 @@ export async function loadFamilyData(db: SupabaseClient, familyId: string): Prom
   const personRows = (peopleRes.data ?? []) as PersonRow[];
   const unionRows = (unionsRes.data ?? []) as UnionRow[];
 
+  // Only this family's own objects are signed or handed out. A key pointing
+  // anywhere else reads as no photo, and the next edit of that person clears it.
+  const photoKey = (r: PersonRow) =>
+    isMediaKey(r.photo_key, familyId, "photos") ? r.photo_key : undefined;
+
   const signed = await signPaths(
     db,
-    personRows.map((r) => r.photo_key).filter((k): k is string => Boolean(k)),
+    personRows.map(photoKey).filter((k): k is string => Boolean(k)),
   );
 
   const slugById = new Map(personRows.map((r) => [r.id, r.slug]));
@@ -99,7 +105,7 @@ export async function loadFamilyData(db: SupabaseClient, familyId: string): Prom
     deathYear: r.death_year ?? undefined,
     bio: r.bio ?? undefined,
     gender: r.gender ?? undefined,
-    photoKey: r.photo_key ?? undefined,
+    photoKey: photoKey(r),
     photoUrl: r.photo_key ? signed.get(r.photo_key) : undefined,
   }));
 
@@ -154,9 +160,4 @@ export async function personIdBySlug(
     .eq("slug", slug)
     .maybeSingle();
   return (data as { id: string } | null)?.id ?? null;
-}
-
-export async function signOne(db: SupabaseClient, path: string | null): Promise<string | undefined> {
-  if (!path) return undefined;
-  return (await signPaths(db, [path])).get(path);
 }
