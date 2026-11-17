@@ -1,0 +1,68 @@
+# Build silaturahmi here, then upload it to the server (43.173.53.14): rsync
+# sends only the files that changed, and `release` restarts the site on them.
+# If the new build isn't healthy, the server keeps the old one and this fails.
+# The Supabase keys go into .env.production inside the upload, which `next
+# start` reads on the server; GitHub masks them in this log.
+# Secrets: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+# SUPABASE_SERVICE_ROLE_KEY, EDIT_ACTOR_SALT, DEPLOY_HOST, DEPLOY_KNOWN_HOSTS, DEPLOY_SSH_KEY.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # Not npm ci: the macOS-made lock lacks Linux-only optional deps (@emnapi) and is out of sync.
+      - run: npm install --no-audit --no-fund
+      - name: Build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EDIT_ACTOR_SALT: ${{ secrets.EDIT_ACTOR_SALT }}
+          NEXT_TELEMETRY_DISABLED: 1
+        run: |
+          for v in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY EDIT_ACTOR_SALT; do
+            [ -n "${!v}" ] || { echo "::error::secret $v is not set"; exit 1; }
+          done
+          umask 077
+          {
+            printf 'NEXT_PUBLIC_SUPABASE_URL=%s\n' "$NEXT_PUBLIC_SUPABASE_URL"
+            printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$NEXT_PUBLIC_SUPABASE_ANON_KEY"
+            printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SUPABASE_SERVICE_ROLE_KEY"
+            printf 'EDIT_ACTOR_SALT=%s\n' "$EDIT_ACTOR_SALT"
+          } > .env.production
+          npx next build
+          npm prune --omit=dev --no-audit --no-fund
+          mkdir out && mv .next public node_modules package.json next.config.ts .env.production out/
+          rm -rf out/.next/cache
+      - name: Upload and release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh="ssh -i $HOME/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes -o ServerAliveInterval=30"
+          # The musl builds of swc and sharp are never used on the server (glibc).
+          rsync -az --delete --exclude node_modules/.bin --exclude 'node_modules/@next/swc-*-musl' \
+            --exclude 'node_modules/@img/*linuxmusl*' -e "$ssh" out/ "ubuntu@$DEPLOY_HOST:"
+          $ssh "ubuntu@$DEPLOY_HOST" release "$GITHUB_SHA"
