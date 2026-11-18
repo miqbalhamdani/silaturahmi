@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { serviceClient, MEDIA_BUCKET } from "../supabase/service";
 import { currentUserId } from "../supabase/server";
-import { assertUnderRateLimit, hashActor, RateLimitError } from "../actor";
+import { assertUnderRateLimit, hashActor, noteUploadToken, RateLimitError } from "../actor";
 import { findFamilyBySlug, loadFamilyData, personIdBySlug, type FamilyRow } from "../mappers";
 import { assertValidPerson, ValidationError } from "../validation";
 import {
@@ -338,7 +338,8 @@ export async function createPhotoUploadUrl(
   bytes: number,
 ): Promise<{ path: string; token: string }> {
   try {
-    const { family, db } = await openFamily(slug);
+    const { family, db, actorId, actorHash } = await openFamily(slug);
+    noteUploadToken(family.id, actorHash, actorId);
 
     const ext = extForMime(contentType);
     if (!ext || !ALLOWED_IMAGE_TYPES.includes(contentType))

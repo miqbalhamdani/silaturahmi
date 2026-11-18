@@ -1,6 +1,5 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { sessionClient } from "@/lib/supabase/server";
 
@@ -16,12 +15,14 @@ export interface AuthState {
   values?: { email?: string; name?: string };
 }
 
+/**
+ * Where auth emails and OAuth send people back to. Fixed config, never the
+ * request: Host and X-Forwarded-Host are client-controlled, and a forged one
+ * would put an attacker's domain into a genuine magic-link or reset email.
+ * Local dev sets SITE_URL=http://localhost:3000.
+ */
 async function siteOrigin(): Promise<string> {
-  const h = await headers();
-  // x-forwarded-host is what Vercel sets; host covers local dev.
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
+  return (process.env.SITE_URL || "https://silaturahmi.jadigampang.com").replace(/\/+$/, "");
 }
 
 function readEmail(formData: FormData): string {
